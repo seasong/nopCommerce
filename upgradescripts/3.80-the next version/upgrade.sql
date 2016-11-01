@@ -1616,6 +1616,57 @@ set @resources='
   <LocaleResource Name="Admin.Orders.Fields.OrderStatus.CancelledNotification">
     <Value>This order is cancelled</Value>
   </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.Description">
+    <Value><![CDATA[Set up requirements to a created discount if you want to limit it to certain user categories depending on a customer role, the amount spent, etc. You can use single requirement type, or group several types and apply them simultaneously.<br>Requirement group is a useful feature for creating discount requirement templates. You can create a requirement group just once and then use it every time you want this limitation to be applied. You can include one requirement group into another one if needed.]]></Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.DiscountRequirementType.AddGroup">
+    <Value>Add requirement group</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.DiscountRequirementType.Hint">
+    <Value>You can choose one of the following requirement types, or add a requirement group to use several requirement types simultaneously.</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.GroupName">
+    <Value>Group name</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.GroupName.Hint">
+    <Value>Specify name of the requirement group (e.g. "Permitted customer roles").</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.RequirementGroup">
+    <Value>Add to group</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.RequirementGroup.Hint">
+    <Value>Choose the group you want the requirement group you’re creating to be assigned to</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.RequirementGroup.Title">
+    <Value>Group</Value>
+  </LocaleResource>
+  <LocaleResource Name="Enums.Nop.Core.Domain.Discounts.RequirementGroupInteractionType.And">
+    <Value>AND</Value>
+  </LocaleResource>
+  <LocaleResource Name="Enums.Nop.Core.Domain.Discounts.RequirementGroupInteractionType.Or">
+    <Value>OR</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.Remove">
+    <Value></Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.Requirement.Title">
+    <Value>Requirement</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.DefaultRequirementGroup">
+    <Value>Default requirement group</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.InteractionTypeInGroup">
+    <Value>Interaction type in this group is</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.GroupIsEmpty">
+    <Value>The group is empty</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.RemoveRequirement">
+    <Value>Remove requirement</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Promotions.Discounts.Requirements.RemoveGroup">
+    <Value>Remove group</Value>
+  </LocaleResource>
 </Language>
 '
 
@@ -4165,4 +4216,65 @@ BEGIN
 		VALUES (@PermissionRecordId, @VendorCustomerRoleId)
 	END
 END
+GO
+
+--new column
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=object_id('[DiscountRequirement]') and NAME='InteractionTypeId')
+BEGIN
+	ALTER TABLE [DiscountRequirement]
+	ADD [InteractionTypeId] int NULL
+END
+GO
+
+--new column
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=object_id('[DiscountRequirement]') and NAME='ParentId')
+BEGIN
+	ALTER TABLE [DiscountRequirement]
+	ADD [ParentId] int NULL
+END
+GO
+
+--new column
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=object_id('[DiscountRequirement]') and NAME='IsGroup')
+BEGIN
+	ALTER TABLE [DiscountRequirement]
+	ADD [IsGroup] bit NULL
+END
+GO
+
+UPDATE [DiscountRequirement]
+SET [IsGroup] = 0
+WHERE [IsGroup] IS NULL
+GO
+
+ALTER TABLE [DiscountRequirement] ALTER COLUMN [IsGroup] bit NOT NULL
+GO
+
+--add default requirement group for all discounts
+DECLARE cursor_defaultGroup CURSOR FOR SELECT Id FROM [Discount]
+DECLARE @discountId int
+
+OPEN cursor_defaultGroup
+FETCH NEXT FROM cursor_defaultGroup INTO @discountId
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM [DiscountRequirement] WHERE [DiscountId] = @discountId AND [ParentId] IS NULL AND [IsGroup] = 1)
+    BEGIN
+        INSERT INTO [DiscountRequirement]
+		    ([DiscountId], [DiscountRequirementRuleSystemName], [InteractionTypeId], [ParentId], [IsGroup])
+	    VALUES
+		    (@discountId, 'Default requirement group', 0, NULL, 1);
+
+        DECLARE @requirementId int = (SELECT SCOPE_IDENTITY());
+
+        UPDATE [DiscountRequirement]
+        SET [ParentId] = @requirementId, [InteractionTypeId] = NULL
+        WHERE [DiscountId] = @discountId AND [Id] <> @requirementId
+    END
+	FETCH NEXT FROM cursor_defaultGroup INTO @discountId
+END
+
+CLOSE cursor_defaultGroup
+DEALLOCATE cursor_defaultGroup
 GO
