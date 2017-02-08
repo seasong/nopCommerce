@@ -1601,6 +1601,12 @@ set @resources='
   <LocaleResource Name="Admin.Customers.CustomerRoles.Fields.EnablePasswordLifetime.Hint">
     <Value>Check to force customers to change their passwords after a specified time.</Value>
   </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.Settings.Order.ExportWithProducts">
+    <Value>Export orders with products</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.Settings.Order.ExportWithProducts.Hint">
+    <Value>Check if orders should be exported with products.</Value>
+  </LocaleResource>  
 </Language>
 '
 
@@ -4105,4 +4111,12 @@ WHERE [EnablePasswordLifetime] IS NULL
 GO
 
 ALTER TABLE [CustomerRole] ALTER COLUMN [EnablePasswordLifetime] bit NOT NULL
+GO
+
+ --new setting
+IF NOT EXISTS (SELECT 1 FROM [Setting] WHERE [name] = N'ordersettings.exportwithproducts')
+BEGIN
+    INSERT [Setting] ([Name], [Value], [StoreId])
+    VALUES (N'ordersettings.exportwithproducts', N'True', 0)
+END
 GO
