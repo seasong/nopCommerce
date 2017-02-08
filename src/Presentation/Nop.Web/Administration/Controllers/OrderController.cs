@@ -301,10 +301,12 @@ namespace Nop.Admin.Controllers
                             var ctrlAttributes = form[controlId];
                             if (!String.IsNullOrEmpty(ctrlAttributes))
                             {
+                                int quantity;
                                 int selectedAttributeId = int.Parse(ctrlAttributes);
                                 if (selectedAttributeId > 0)
                                     attributesXml = _productAttributeParser.AddProductAttribute(attributesXml,
-                                        attribute, selectedAttributeId.ToString());
+                                        attribute, selectedAttributeId.ToString(),
+                                        int.TryParse(form[string.Format("product_attribute_{0}_{1}_qty", attribute.Id, selectedAttributeId)], out quantity) && quantity > 1 ? (int?)quantity : null);
                             }
                         }
                         break;
@@ -315,10 +317,12 @@ namespace Nop.Admin.Controllers
                             {
                                 foreach (var item in ctrlAttributes.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
                                 {
+                                    int quantity;
                                     int selectedAttributeId = int.Parse(item);
                                     if (selectedAttributeId > 0)
                                         attributesXml = _productAttributeParser.AddProductAttribute(attributesXml,
-                                            attribute, selectedAttributeId.ToString());
+                                            attribute, selectedAttributeId.ToString(),
+                                            int.TryParse(form[string.Format("product_attribute_{0}_{1}_qty", attribute.Id, item)], out quantity) && quantity > 1 ? (int?)quantity : null);
                                 }
                             }
                         }
@@ -332,8 +336,10 @@ namespace Nop.Admin.Controllers
                                 .Select(v => v.Id)
                                 .ToList())
                             {
+                                int quantity;
                                 attributesXml = _productAttributeParser.AddProductAttribute(attributesXml,
-                                    attribute, selectedAttributeId.ToString());
+                                    attribute, selectedAttributeId.ToString(),
+                                    int.TryParse(form[string.Format("product_attribute_{0}_{1}_qty", attribute.Id, selectedAttributeId)], out quantity) && quantity > 1 ? (int?)quantity : null);
                             }
                         }
                         break;
@@ -860,13 +866,22 @@ namespace Nop.Admin.Controllers
                     var attributeValues = _productAttributeService.GetProductAttributeValues(attribute.Id);
                     foreach (var attributeValue in attributeValues)
                     {
-                        var attributeValueModel = new OrderModel.AddOrderProductModel.ProductAttributeValueModel
+                        //price adjustment
+                        var priceAdjustment = _taxService.GetProductPrice(product,
+                            _priceCalculationService.GetProductAttributeValuePriceAdjustment(attributeValue), out taxRate);
+
+                        attributeModel.Values.Add(new OrderModel.AddOrderProductModel.ProductAttributeValueModel
                         {
                             Id = attributeValue.Id,
                             Name = attributeValue.Name,
-                            IsPreSelected = attributeValue.IsPreSelected
-                        };
-                        attributeModel.Values.Add(attributeValueModel);
+                            IsPreSelected = attributeValue.IsPreSelected,
+                            CustomerEntersQty = attributeValue.CustomerEntersQty,
+                            Quantity = attributeValue.Quantity,
+                            PriceAdjustment = priceAdjustment == decimal.Zero ? string.Empty : priceAdjustment > decimal.Zero
+                                ? string.Concat("+", _priceFormatter.FormatPrice(priceAdjustment, false, false))
+                                : string.Concat("-", _priceFormatter.FormatPrice(-priceAdjustment, false, false)),
+                            PriceAdjustmentValue = priceAdjustment
+                        });
                     }
                 }
 
