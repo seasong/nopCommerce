@@ -21,9 +21,13 @@ namespace Nop.Services.Configuration
         #region Constants
 
         /// <summary>
-        /// Key for caching
+        /// Key for caching settings
         /// </summary>
-        private const string SETTINGS_ALL_KEY = "Nop.setting.all";
+        /// <remarks>
+        /// {0} : settings key
+        /// </remarks>
+        private const string SETTINGS_BY_KEY = "Nop.setting.{0}";
+
         /// <summary>
         /// Key pattern to clear cache
         /// </summary>
@@ -57,64 +61,31 @@ namespace Nop.Services.Configuration
 
         #endregion
 
-        #region Nested classes
-
-        [Serializable]
-        public class SettingForCaching
-        {
-            public int Id { get; set; }
-            public string Name { get; set; }
-            public string Value { get; set; }
-            public int StoreId { get; set; }
-        }
-
-        #endregion
-
         #region Utilities
 
         /// <summary>
-        /// Gets all settings
+        /// Gets cached settings by key
         /// </summary>
-        /// <returns>Settings</returns>
-        protected virtual IDictionary<string, IList<SettingForCaching>> GetAllSettingsCached()
+        /// <param name="key">Key</param>
+        /// <returns>List of settings</returns>
+        protected virtual IList<SettingForCaching> GetSettingsForCachingByKey(string key)
         {
-            //cache
-            string key = string.Format(SETTINGS_ALL_KEY);
+            key = key.Trim().ToLowerInvariant();
+
+            //cache settings
+            var cacheKey = string.Format(SETTINGS_BY_KEY, key);
             return _cacheManager.Get(key, () =>
             {
-                //we use no tracking here for performance optimization
-                //anyway records are loaded only for read-only operations
-                var query = from s in _settingRepository.TableNoTracking
-                            orderby s.Name, s.StoreId
-                            select s;
-                var settings = query.ToList();
-                var dictionary = new Dictionary<string, IList<SettingForCaching>>();
-                foreach (var s in settings)
+                var query = _settingRepository.TableNoTracking
+                    .Where(setting => setting.Name.Equals(key, StringComparison.InvariantCultureIgnoreCase));
+
+                return query.Select(setting => new SettingForCaching
                 {
-                    var resourceName = s.Name.ToLowerInvariant();
-                    var settingForCaching = new SettingForCaching
-                            {
-                                Id = s.Id,
-                                Name = s.Name,
-                                Value = s.Value,
-                                StoreId = s.StoreId
-                            };
-                    if (!dictionary.ContainsKey(resourceName))
-                    {
-                        //first setting
-                        dictionary.Add(resourceName, new List<SettingForCaching>
-                        {
-                            settingForCaching
-                        });
-                    }
-                    else
-                    {
-                        //already added
-                        //most probably it's the setting with the same name but for some certain store (storeId > 0)
-                        dictionary[resourceName].Add(settingForCaching);
-                    }
-                }
-                return dictionary;
+                    Id = setting.Id,
+                    Name = setting.Name,
+                    Value = setting.Value,
+                    StoreId = setting.StoreId
+                }).ToList();
             });
         }
 
@@ -223,25 +194,20 @@ namespace Nop.Services.Configuration
         /// <returns>Setting</returns>
         public virtual Setting GetSetting(string key, int storeId = 0, bool loadSharedValueIfNotFound = false)
         {
-            if (String.IsNullOrEmpty(key))
+            if (string.IsNullOrEmpty(key))
                 return null;
 
-            var settings = GetAllSettingsCached();
-            key = key.Trim().ToLowerInvariant();
-            if (settings.ContainsKey(key))
-            {
-                var settingsByKey = settings[key];
-                var setting = settingsByKey.FirstOrDefault(x => x.StoreId == storeId);
+            //get cached settings
+            var allSettingsByKey = GetSettingsForCachingByKey(key);
 
-                //load shared value?
-                if (setting == null && storeId > 0 && loadSharedValueIfNotFound)
-                    setting = settingsByKey.FirstOrDefault(x => x.StoreId == 0);
+            //try get setting
+            var settingForCaching = allSettingsByKey.FirstOrDefault(settings => settings.StoreId == storeId);
 
-                if (setting != null)
-                    return GetSettingById(setting.Id);
-            }
+            //load shared value?
+            if (settingForCaching == null && storeId > 0 && loadSharedValueIfNotFound)
+                settingForCaching = allSettingsByKey.FirstOrDefault(settings => settings.StoreId == 0);
 
-            return null;
+            return settingForCaching != null ? GetSettingById(settingForCaching.Id) : null;
         }
 
         /// <summary>
@@ -253,28 +219,22 @@ namespace Nop.Services.Configuration
         /// <param name="storeId">Store identifier</param>
         /// <param name="loadSharedValueIfNotFound">A value indicating whether a shared (for all stores) value should be loaded if a value specific for a certain is not found</param>
         /// <returns>Setting value</returns>
-        public virtual T GetSettingByKey<T>(string key, T defaultValue = default(T), 
-            int storeId = 0, bool loadSharedValueIfNotFound = false)
+        public virtual T GetSettingByKey<T>(string key, T defaultValue = default(T), int storeId = 0, bool loadSharedValueIfNotFound = false)
         {
-            if (String.IsNullOrEmpty(key))
+            if (string.IsNullOrEmpty(key))
                 return defaultValue;
 
-            var settings = GetAllSettingsCached();
-            key = key.Trim().ToLowerInvariant();
-            if (settings.ContainsKey(key))
-            {
-                var settingsByKey = settings[key];
-                var setting = settingsByKey.FirstOrDefault(x => x.StoreId == storeId);
+            //get cached settings
+            var allSettingsByKey = GetSettingsForCachingByKey(key);
 
-                //load shared value?
-                if (setting == null && storeId > 0 && loadSharedValueIfNotFound)
-                    setting = settingsByKey.FirstOrDefault(x => x.StoreId == 0);
+            //try get setting
+            var settingForCaching = allSettingsByKey.FirstOrDefault(settings => settings.StoreId == storeId);
 
-                if (setting != null)
-                    return CommonHelper.To<T>(setting.Value);
-            }
+            //load shared value?
+            if (settingForCaching == null && storeId > 0 && loadSharedValueIfNotFound)
+                settingForCaching = allSettingsByKey.FirstOrDefault(settings => settings.StoreId == 0);
 
-            return defaultValue;
+            return settingForCaching != null ? CommonHelper.To<T>(settingForCaching.Value)  : defaultValue;
         }
 
         /// <summary>
@@ -289,26 +249,29 @@ namespace Nop.Services.Configuration
         {
             if (key == null)
                 throw new ArgumentNullException("key");
-            key = key.Trim().ToLowerInvariant();
-            string valueStr = TypeDescriptor.GetConverter(typeof(T)).ConvertToInvariantString(value);
 
-            var allSettings = GetAllSettingsCached();
-            var settingForCaching = allSettings.ContainsKey(key) ? 
-                allSettings[key].FirstOrDefault(x => x.StoreId == storeId) : null;
+            //get value as string
+            var stringValue = TypeDescriptor.GetConverter(typeof(T)).ConvertToInvariantString(value);
+
+            //get cached settings
+            var allSettingsByKey = GetSettingsForCachingByKey(key);
+
+            //try get setting
+            var settingForCaching = allSettingsByKey.FirstOrDefault(settings => settings.StoreId == storeId);
             if (settingForCaching != null)
             {
-                //update
+                //update setting
                 var setting = GetSettingById(settingForCaching.Id);
-                setting.Value = valueStr;
+                setting.Value = stringValue;
                 UpdateSetting(setting, clearCache);
             }
             else
             {
-                //insert
+                //or insert new one
                 var setting = new Setting
                 {
                     Name = key,
-                    Value = valueStr,
+                    Value = stringValue,
                     StoreId = storeId
                 };
                 InsertSetting(setting, clearCache);
@@ -502,17 +465,19 @@ namespace Nop.Services.Configuration
         public virtual void DeleteSetting<T, TPropType>(T settings,
             Expression<Func<T, TPropType>> keySelector, int storeId = 0) where T : ISettings, new()
         {
-            string key = settings.GetSettingKey(keySelector);
-            key = key.Trim().ToLowerInvariant();
+            var key = settings.GetSettingKey(keySelector);
 
-            var allSettings = GetAllSettingsCached();
-            var settingForCaching = allSettings.ContainsKey(key) ?
-                allSettings[key].FirstOrDefault(x => x.StoreId == storeId) : null;
+            //get cached settings
+            var allSettingsByKey = GetSettingsForCachingByKey(key);
+
+            //try get setting
+            var settingForCaching = allSettingsByKey.FirstOrDefault(setting => setting.StoreId == storeId);
             if (settingForCaching != null)
             {
-                //update
+                //delete setting
                 var setting = GetSettingById(settingForCaching.Id);
-                DeleteSetting(setting);
+                if (setting != null)
+                    DeleteSetting(setting);
             }
         }
 
